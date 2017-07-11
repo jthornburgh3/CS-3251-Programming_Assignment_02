@@ -31,6 +31,7 @@ public class PacketIO {
         byte[] receiveData = new byte[1007]; // 7 bytes for header, 1000 for payload
         DatagramPacket incommingPacket = new DatagramPacket(receiveData, receiveData.length);
         try {
+            socket.setSoTimeout(2000);
             socket.receive(incommingPacket);
         } catch (UnknownHostException e) {
             e.printStackTrace(System.out);

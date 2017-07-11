@@ -5,7 +5,8 @@ import java.util.Scanner;
 public class reldatClient {
     
     static String hostName;
-    static int portNumber;
+    static int serverPN;
+    static int clientPN;
     static int maxWindowSize;
     static boolean serverIsAlive = false;
     
@@ -13,7 +14,7 @@ public class reldatClient {
     static InetAddress hostIP;
     
     static ConnectionMonitor cm;
-    
+    static ConnectionSignal cs;
     
     
     public static void main(String[] args) throws IOException {
@@ -29,14 +30,11 @@ public class reldatClient {
         
         try {
             hostName = args[0].split(":")[0];
-            portNumber = Integer.parseInt(args[0].split(":")[1]);
+            serverPN = Integer.parseInt(args[0].split(":")[1]);
             maxWindowSize = Integer.parseInt(args[1]);
         } catch (NumberFormatException e) {
             System.err.println("reldat-client <IP/hostname:UDP port number> <max window size>");
         }
-        
-        System.out.println(hostName);
-        System.out.println(portNumber);
         
         // set up connection with 3-way-handshake
         if (!setUpConnection()) {
@@ -44,16 +42,10 @@ public class reldatClient {
         }
         
         // start connection monitoring
-        try {
-            cm.startMonitoring();
-        } catch (ConnectionLostException e) {
-            System.out.println("\nConnection with server has been lost.  Terminating the client.");
-            return;
-        }
+        cm.start();
         
-        waitForUserInput();
-
-        
+        // listens for command line prompts
+        waitForUserInput();  
     }
     
     /**
@@ -61,30 +53,31 @@ public class reldatClient {
      * inputs:
      *    -transform <file name>
      *    -disconnect
+     *
+     * @return the File to transform or null if the connection has been 
+     *          lost or terminated
      */
-    public static void waitForUserInput() {
+    public static File waitForUserInput() {
         Scanner userInput = new Scanner(System.in);
         File fileToSend;
         
-        boolean validUserInput = false;
-        while (!validUserInput) {
+        while (cs.isAlive()) {
             String newInput = userInput.nextLine();
             
             if (newInput.contains("transform")) {
                 fileToSend = new File(newInput.split(" ")[1]);
                 if (fileToSend.exists()) {
-                    transformFile(fileToSend);
-                    validUserInput = true;
+                    return fileToSend;
                 }
             } else if (newInput.equals("disconnect")) {
                 disconnect();
-                validUserInput = true;
+                return null;
             } else {
                 System.out.println("Invalid Input\n  transform <file name>\n  disconnect");
             }
         }
-        
         userInput.close();
+        return null;
     }
     
     /**
@@ -98,7 +91,7 @@ public class reldatClient {
         String message = ""; //data to send
         
         // send data to server
-        PacketIO.sendPacket(message.getBytes(), clientSocket, hostIP, portNumber);
+        PacketIO.sendPacket(message.getBytes(), clientSocket, hostIP, serverPN);
         
         // receive from server
         String returnedMessage = PacketIO.receivePacket(clientSocket).getData().toString();
@@ -111,6 +104,21 @@ public class reldatClient {
      */
     public static void disconnect() {
         System.out.println("Disconnect requested: terminating connection.");
+        cm.stopMonitoring();
+        cs.setConnectionStatus(false);
+        for (int i = 0; i < 5000; i++) {
+            byte[] finMsg1 = {(byte) 0x4F};
+            PacketIO.sendPacket(finMsg1, clientSocket, hostIP, serverPN);
+            DatagramPacket p = PacketIO.receivePacket(clientSocket, null);
+            if (p != null && p.getData()[0] == (byte) 0x5F) {
+                System.out.println("Disconnect successful.  Closing client.\n");
+                break;
+            }
+        }
+        byte [] finMsg3 = {(byte) 0x6F};
+        for (int j = 0; j < 5; j++) {
+            PacketIO.sendPacket(finMsg3, clientSocket, hostIP, serverPN);
+        }
     }
    
     /** 
@@ -124,6 +132,7 @@ public class reldatClient {
         try {
             clientSocket = new DatagramSocket();
             hostIP = InetAddress.getByName(hostName);
+            clientPN = clientSocket.getLocalPort();
         } catch (SocketException e) {
             e.printStackTrace(System.out);
             return false;
@@ -133,12 +142,11 @@ public class reldatClient {
         }
         
         // send handshakes
-        clientSocket.setSoTimeout(2000);
         for (int i = 0; i < 2; i++) {
             for (int j = 0; j < 10; j++) {
                 if (i == 0) {
                     byte[] syncMsg1 = {(byte) 0x1F};
-                    PacketIO.sendPacket(syncMsg1, clientSocket, hostIP, portNumber);
+                    PacketIO.sendPacket(syncMsg1, clientSocket, hostIP, serverPN);
                     DatagramPacket p = PacketIO.receivePacket(clientSocket, null);
                     if (null == p || p.getData()[0] != (byte) 0x2F) {
                         System.out.printf("Unsuccessful.  Retrying (%d) ...\n", j + 1);
@@ -148,21 +156,22 @@ public class reldatClient {
                         }
                     } else if (p.getData()[0] == (byte) 0x2F) {
                         System.out.println("Connection Established.\n");
-                        j = 10;
+                        break;
                     }
                 } else if (i == 1) {
                     byte [] syncMsg3 = {(byte) 0x3F};
-                    // fast retransmit
-                    PacketIO.sendPacket(syncMsg3, clientSocket, hostIP, portNumber);
-                    PacketIO.sendPacket(syncMsg3, clientSocket, hostIP, portNumber);
-                    PacketIO.sendPacket(syncMsg3, clientSocket, hostIP, portNumber);
+                    if (j < 3) { // fast retransmit
+                        PacketIO.sendPacket(syncMsg3, clientSocket, hostIP, serverPN);
+                    } else {
+                        break;
+                    }
                 }
             }
         }
-        clientSocket.setSoTimeout(0); // set socket to not timeout
         
         // initialize ConnectionMonitor
-        cm = new ConnectionMonitor(true, clientSocket, hostIP, portNumber);
+        cs = new ConnectionSignal(true);
+        cm = new ConnectionMonitor(clientSocket, hostIP, serverPN, cs);
         
         return true;        
     }

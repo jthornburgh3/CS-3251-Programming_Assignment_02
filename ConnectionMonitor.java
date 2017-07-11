@@ -12,24 +12,23 @@ public class ConnectionMonitor extends Thread {
     long lastSend = System.currentTimeMillis();
     
     boolean monitoring = false;
-    // will send confirmation packets iff sender == true;
-    boolean sender = false;
+    static ConnectionSignal cs;
 
     static DatagramSocket socket;
     static InetAddress hostIP;
     static int portNumber;
     
-    public ConnectionMonitor(boolean sender, DatagramSocket sckt,
-                             InetAddress ip, int portNumber) {
-        this.sender = sender;
+    public ConnectionMonitor(DatagramSocket sckt, InetAddress ip, 
+                            int portNumber, ConnectionSignal cs) {
         this.socket = sckt;
         this.hostIP = ip;
         this.portNumber = portNumber;
+        this.cs = cs;
     }
     
     @Override
     public void run() {
-       
+       startMonitoring();
     }
     
     // reset timeout 
@@ -39,14 +38,16 @@ public class ConnectionMonitor extends Thread {
     }
     
     // sends packets every 500 milliseconds
-    public void startMonitoring() throws ConnectionLostException {
+    public void startMonitoring() {
         monitoring = true;
         while (monitoring) {
-            if (sender && System.currentTimeMillis() - lastSend >= 500) {
+            if (System.currentTimeMillis() - lastSend >= 500) {
                 sendConfimationPacket();
+                lastSend = System.currentTimeMillis();
             }
             if (System.currentTimeMillis() - lastConfirmation > 8000) {
-                throw new ConnectionLostException();
+                cs.setConnectionStatus(false);
+                return;
             }
         }
     }
