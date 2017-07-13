@@ -73,7 +73,7 @@ public class reldatServer {
             InetAddress receivedIP = p.getAddress();
             int receivedPN = p.getPort();
             ClientInfo newClient = new ClientInfo(receivedIP, receivedPN);
-            System.out.println("Received Sync Request from Client " + newClient.ip  + ":" + newClient.pn);
+            System.out.println("Received Sync Request from Client " + newClient.getIP()  + ":" + newClient.getPN());
             System.out.println("before add: "+ clientList);
             clientList.add(newClient);
             System.out.println("after add: " + clientList);
@@ -84,7 +84,7 @@ public class reldatServer {
 
         // if lost/corrupted, client will send another request
         byte[] syncMsg2 = {(byte) 0x2F};
-        PacketIO.sendPacket(syncMsg2, serverSocket, curClient.ip, curClient.pn);
+        PacketIO.sendPacket(syncMsg2, serverSocket, curClient.getIP(), curClient.getPN());
 
         return true;
     }
@@ -96,7 +96,7 @@ public class reldatServer {
             return false;
         }
         byte[] finAck = {(byte) 0x5F};
-        PacketIO.sendPacket(finAck, serverSocket, curClient.ip, curClient.pn);
+        PacketIO.sendPacket(finAck, serverSocket, curClient.getIP(), curClient.getPN());
         return true;
     }
 
@@ -106,7 +106,7 @@ public class reldatServer {
             return;
         } else {
             System.out.println("Successfully disconnected with Client "
-                    + curClient.ip  + ":" + curClient.pn);
+                    + curClient.getIP() + ":" + curClient.getPN());
             clientList.remove(curClient);
         }
     }
@@ -118,7 +118,7 @@ public class reldatServer {
     // returns the client info of the given packet or null if not found
     private static ClientInfo getClient(DatagramPacket p) {
         for (ClientInfo c: clientList) {
-            if (c.ip.equals(p.getAddress()) && c.pn == p.getPort()) {
+            if (c.getIP().equals(p.getAddress()) && c.getPN() == p.getPort()) {
                 return c;
             }
         }
