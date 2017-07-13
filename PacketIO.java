@@ -24,14 +24,12 @@ public class PacketIO {
 
     /**
      * Receives a datagram packet.
-     * Also updates the current ConnectionMonitor when it receives a connection
-     * confirmation packet.
      */
-    public static DatagramPacket receivePacket(DatagramSocket socket, ConnectionMonitor cm) {
+    public static DatagramPacket receivePacket(DatagramSocket socket) {
         byte[] receiveData = new byte[1007]; // 7 bytes for header, 1000 for payload
         DatagramPacket incommingPacket = new DatagramPacket(receiveData, receiveData.length);
         try {
-            socket.setSoTimeout(2000);
+            socket.setSoTimeout(1000);
             socket.receive(incommingPacket);
         } catch (UnknownHostException e) {
             e.printStackTrace(System.out);
@@ -39,10 +37,6 @@ public class PacketIO {
             return null;
         } catch (IOException e) {
             e.printStackTrace(System.out);
-        }
-        byte[] r = incommingPacket.getData();
-        if (r[0] == (byte) 0xFF && cm != null) {
-            cm.receivedConfirmationPacket();
         }
         return incommingPacket;
     }

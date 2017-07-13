@@ -1,127 +1,128 @@
 import java.io.*;
 import java.net.*;
- 
+import java.util.List;
+import java.util.LinkedList;
+
 public class reldatServer {
-    
+
     static int serverPN;
-    static int clientPN;
     static int maxWindowSize;
-    
+
     static DatagramSocket serverSocket;
-    static InetAddress clientIP;
-    
-    static ConnectionMonitor cm;
-    static ConnectionSignal cs;
-    static boolean requestedDisconnect;
-    
-    
+
+    static List<ClientInfo> clientList;
+
+
     public static void main(String[] args) throws SocketException {
 
         if (args.length != 2) {
             System.err.println("reldat-server <UDP port number> <max recieve window size>");
             return;
         }
-        
+
         serverPN = Integer.parseInt(args[0]);
         maxWindowSize = Integer.parseInt(args[1]);
 
-        // listen for client connection
-        if (!setUpClientConnection()) {
-            return;
-        }
-        
-        // start connection monitoring
-        cm.start();
+        clientList = new LinkedList<ClientInfo>();
+        serverSocket = new DatagramSocket(serverPN);
 
         // start receiving packets
-        while (cs.isAlive()) {
-            interpretPacket(PacketIO.receivePacket(serverSocket, cm));
-        } 
-        
-        // connection lost
-        if (!requestedDisconnect) {
-            System.out.println("\nConnection with server has been lost.  Terminating the client.");
+        while (true) {
+            interpretPacket(PacketIO.receivePacket(serverSocket));
+            System.out.println("fin: " + clientList);
         }
-       
+
     }
-    
+
     /**
      * Used for interpreting packets after connection has been set up.
-     * If an connection monitoring packet is received, will ignore.
+     * If a new connection request is received, will set up new client connection.
+     * If an connection monitoring packet is received, will refresh connection.
+     * If a request termination packet is received, calls disconnect()
      */
     private static void interpretPacket(DatagramPacket packet) {
+        
         if (null == packet) {
-            System.out.println("got null pakcet");
+            //System.out.println(null == packet ? "null" : packet.getData()[0]);
             return;
-        } else if (packet.getData()[0] == (byte) 0xFF) {
-            // confirm packet (ignore)
+        } else if (packet.getData()[0] == (byte) 0x1F) {
+            // new client connection request
+            setUpClientConnection(packet);
         } else if (packet.getData()[0] == (byte) 0x4F) {
             // received disconnect request
-            disconnectWithClient();
+            disconnectWithClient(packet);
+        } else if (packet.getData()[0] == (byte) 0x6F) {
+            // received finAck from client
+            processFinAckPacket(packet);
         }
         //System.out.println(packet.getData()[0]);
-        
+
     }
-    
+
     /**
-     * Called once the server starts running.  Listens for syncing packets from
-     * a client in a 3-way handshake and stop-and-wait format.
-     * 
+     * Establises a connection
+     *
      * @return true when a connection is set up.  false otherwise
      */
-    private static boolean setUpClientConnection() throws SocketException {
-        // set up socket
-        serverSocket = new DatagramSocket(serverPN);
-        
-        System.out.println("Listening for Client ...");
-        boolean receivedSyncFromClient = false;
-        while (!receivedSyncFromClient) {
-            DatagramPacket p = PacketIO.receivePacket(serverSocket, null);
-            if (null != p && p.getData()[0] == (byte) 0x1F) {
-                System.out.println("Received Sync Request ...");
-                clientIP = p.getAddress();
-                clientPN = p.getPort();
-                receivedSyncFromClient = true;
-            }
+    private static boolean setUpClientConnection(DatagramPacket p) {
+        ClientInfo curClient = getClient(p);
+        System.out.println("set up got: " + curClient);
+        System.out.println(clientList);
+        if (null == curClient) {
+            // add new client to clientList
+            InetAddress receivedIP = p.getAddress();
+            int receivedPN = p.getPort();
+            ClientInfo newClient = new ClientInfo(receivedIP, receivedPN);
+            System.out.println("Received Sync Request from Client " + newClient.ip  + ":" + newClient.pn);
+            System.out.println("before add: "+ clientList);
+            clientList.add(newClient);
+            System.out.println("after add: " + clientList);
+            curClient = newClient;
+        } else {
+            //System.out.println("not null");
         }
-        for (int j = 0; j < 10; j++) {
-            byte[] syncMsg2 = {(byte) 0x2F};
-            PacketIO.sendPacket(syncMsg2, serverSocket, clientIP, clientPN);
-            DatagramPacket p = PacketIO.receivePacket(serverSocket, null);
-            if (null == p || p.getData()[0] != (byte) 0x3F) {
-                System.out.printf("Ack Unsuccessful.  Retrying (%d) ...\n", j + 1);
-                if (j == 9) {
-                    System.out.println("Connection unsuccessful.\n");
-                    return false;
-                }
-            } else if (p.getData()[0] == (byte) 0x3F) {
-                System.out.println("Connection Established.\n");
-                break;
-            }
-        }
-        
-        // set up connection monitoring
-        cs = new ConnectionSignal(true);
-        cm = new ConnectionMonitor(serverSocket, clientIP, clientPN, cs);
 
+        // if lost/corrupted, client will send another request
+        byte[] syncMsg2 = {(byte) 0x2F};
+        PacketIO.sendPacket(syncMsg2, serverSocket, curClient.ip, curClient.pn);
 
         return true;
     }
 
-    private static void disconnectWithClient() {
-        System.out.println("Received Disconnect Request ...");
-        requestedDisconnect = true;
-        cm.stopMonitoring();
-        cs.setConnectionStatus(false);
-        for (int i = 0; i< 5000; i++) {
-            byte[] finMsg2 = {(byte) 0x5F};
-            PacketIO.sendPacket(finMsg2, serverSocket, clientIP, clientPN);
-            DatagramPacket p = PacketIO.receivePacket(serverSocket, null);
-            if (p != null && p.getData()[0] == (byte) 0x6F) {
-                System.out.println("\nDisconnect successful.  Closing server.\n");
-                break;
-            }
+    // returns false if received a packet from unknown client
+    private static boolean disconnectWithClient(DatagramPacket p) {
+        ClientInfo curClient = getClient(p);
+        if (null == curClient) {
+            return false;
+        }
+        byte[] finAck = {(byte) 0x5F};
+        PacketIO.sendPacket(finAck, serverSocket, curClient.ip, curClient.pn);
+        return true;
+    }
+
+    private static void processFinAckPacket(DatagramPacket p) {
+        ClientInfo curClient = getClient(p);
+        if (null == curClient) {
+            return;
+        } else {
+            System.out.println("Successfully disconnected with Client "
+                    + curClient.ip  + ":" + curClient.pn);
+            clientList.remove(curClient);
         }
     }
-    
+
+    private static boolean hasTimedOut(long timeout, long origTime) {
+        return (System.currentTimeMillis() - origTime) > timeout;
+    }
+
+    // returns the client info of the given packet or null if not found
+    private static ClientInfo getClient(DatagramPacket p) {
+        for (ClientInfo c: clientList) {
+            if (c.ip.equals(p.getAddress()) && c.pn == p.getPort()) {
+                return c;
+            }
+        }
+        return null;
+    }
+
 }
