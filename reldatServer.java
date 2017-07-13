@@ -29,7 +29,7 @@ public class reldatServer {
         // start receiving packets
         while (true) {
             interpretPacket(PacketIO.receivePacket(serverSocket));
-            System.out.println("fin: " + clientList);
+            //System.out.println("fin: " + clientList);
         }
 
     }
@@ -66,17 +66,13 @@ public class reldatServer {
      */
     private static boolean setUpClientConnection(DatagramPacket p) {
         ClientInfo curClient = getClient(p);
-        System.out.println("set up got: " + curClient);
-        System.out.println(clientList);
         if (null == curClient) {
             // add new client to clientList
             InetAddress receivedIP = p.getAddress();
             int receivedPN = p.getPort();
             ClientInfo newClient = new ClientInfo(receivedIP, receivedPN);
-            System.out.println("Received Sync Request from Client " + newClient.getIP()  + ":" + newClient.getPN());
-            System.out.println("before add: "+ clientList);
+            System.out.println("Established connection with client: " + newClient.getIP()  + ":" + newClient.getPN());
             clientList.add(newClient);
-            System.out.println("after add: " + clientList);
             curClient = newClient;
         } else {
             //System.out.println("not null");
